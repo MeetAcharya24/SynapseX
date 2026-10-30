@@ -2,114 +2,134 @@
 
 import { useState } from "react";
 import { useStudioStore } from "@/lib/store";
+import { useSession } from "@/lib/auth-client";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Step = { nodeId: string; label: string; output: string };
 
 export default function Playground() {
-  const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
   const nodes = useStudioStore((s) => s.nodes);
   const apiKeys = useStudioStore((s) => s.apiKeys);
-  const node = nodes.find((n) => n.id === selectedNodeId);
+  const currentProjectId = useStudioStore((s) => s.currentProjectId);
+  const currentProjectName = useStudioStore((s) => s.currentProjectName);
+  const isDirty = useStudioStore((s) => s.isDirty);
+  const saveProject = useStudioStore((s) => s.saveProject);
 
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { data: session } = useSession();
+
+  const [task, setTask] = useState("");
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [status, setStatus] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function send() {
-    if (!node || !input.trim()) return;
-    const next = [...messages, { role: "user" as const, content: input }];
-    setMessages(next);
-    setInput("");
-    setLoading(true);
+  const usedProviders = Array.from(new Set(nodes.map((n) => n.data.provider)));
+  const missingKeys = usedProviders.filter((p) => !apiKeys[p]);
+
+  async function run() {
+    if (!task.trim() || running) return;
+    setRunning(true);
     setError(null);
+    setSteps([]);
+    setStatus(null);
 
     try {
-      const res = await fetch("/api/run", {
+      let projectId = currentProjectId;
+      if (!projectId || isDirty) {
+        setStatus("Saving project...");
+        const result = await saveProject(currentProjectName ?? undefined);
+        if ("error" in result) {
+          setError(result.error);
+          return;
+        }
+        projectId = result.id;
+      }
+
+      setStatus("Running...");
+      const res = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: node.data.provider,
-          apiKey: apiKeys[node.data.provider] ?? "",
-          model: node.data.model,
-          systemPrompt: node.data.systemPrompt,
-          messages: next,
-        }),
+        body: JSON.stringify({ projectId, task, apiKeys }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Request failed");
-      setMessages([...next, { role: "assistant", content: json.text }]);
+
+      const trace: { nodeId: string; input: string; output: string }[] =
+        json.trace ?? [];
+      setSteps(
+        trace.map((t) => ({
+          nodeId: t.nodeId,
+          label: nodes.find((n) => n.id === t.nodeId)?.data.label ?? t.nodeId,
+          output: t.output,
+        }))
+      );
+      setStatus(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
+      setStatus(null);
     } finally {
-      setLoading(false);
+      setRunning(false);
     }
   }
-
-  if (!node) {
-    return (
-      <div className="flex h-56 items-center justify-center border-t border-hair px-6 text-center">
-        <p className="text-sm text-faint">
-          Select an agent node to test it here.
-        </p>
-      </div>
-    );
-  }
-
-  const hasKey = Boolean(apiKeys[node.data.provider]);
 
   return (
     <div className="flex h-56 flex-col border-t border-hair">
       <div className="flex items-center justify-between border-b border-hair px-4 py-2">
         <p className="font-mono text-[10px] tracking-widest text-faint">
-          PLAYGROUND · {node.data.label.toUpperCase()}
+          PLAYGROUND · {(currentProjectName ?? "UNSAVED PROJECT").toUpperCase()}
         </p>
-        {!hasKey && (
+        {missingKeys.length > 0 && (
           <span className="font-mono text-[10px] text-accent">
-            no {node.data.provider} key set
+            no {missingKeys.join(", ")} key set
           </span>
         )}
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && (
-          <p className="text-sm text-faint">No messages yet.</p>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className="text-sm">
-            <span
-              className="font-mono text-[10px]"
-              style={{
-                color:
-                  m.role === "user"
-                    ? "var(--color-text-dim)"
-                    : "var(--color-accent)",
-              }}
-            >
-              {m.role === "user" ? "YOU" : "AGENT"}
-            </span>
-            <p className="text-dim">{m.content}</p>
+      {!session ? (
+        <div className="flex flex-1 items-center justify-center px-6 text-center">
+          <p className="text-sm text-faint">
+            Sign in to run this project — execution needs a saved cloud
+            project.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+            {steps.length === 0 && !status && (
+              <p className="text-sm text-faint">No run yet.</p>
+            )}
+            {status && <p className="text-sm text-faint">{status}</p>}
+            {steps.map((step, i) => (
+              <div key={`${step.nodeId}-${i}`} className="text-sm">
+                <span
+                  className="font-mono text-[10px]"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  STEP {i + 1} · {step.label.toUpperCase()}
+                </span>
+                <p className="whitespace-pre-wrap text-dim">{step.output}</p>
+              </div>
+            ))}
+            {error && <p className="text-sm text-red-400">{error}</p>}
           </div>
-        ))}
-        {error && <p className="text-sm text-red-400">{error}</p>}
-      </div>
 
-      <div className="flex gap-2 border-t border-hair p-3">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Send a test prompt…"
-          className="flex-1 rounded-lg border-hair bg-transparent px-3 py-2 text-sm outline-none focus:border-[color:var(--color-accent-line)]"
-        />
-        <button
-          onClick={send}
-          disabled={loading}
-          className="rounded-lg bg-[color:var(--color-accent)] px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
-        >
-          {loading ? "…" : "Send"}
-        </button>
-      </div>
+          <div className="flex gap-2 border-t border-hair p-3">
+            <input
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && run()}
+              placeholder="Send a task to run through the graph…"
+              className="flex-1 rounded-lg border-hair bg-transparent px-3 py-2 text-sm outline-none focus:border-[color:var(--color-accent-line)]"
+            />
+            <button
+              onClick={run}
+              disabled={running}
+              className="rounded-lg bg-[color:var(--color-accent)] px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
+            >
+              {running ? "…" : "Run"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

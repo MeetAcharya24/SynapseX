@@ -18,16 +18,14 @@ export default function Sidebar({
   const selectedNodeId = useStudioStore((s) => s.selectedNodeId);
   const loadGraph = useStudioStore((s) => s.loadGraph);
   const newProjectGraph = useStudioStore((s) => s.newProject);
+  const saveProject = useStudioStore((s) => s.saveProject);
+  const clearProjectBinding = useStudioStore((s) => s.clearProjectBinding);
+  const currentProjectId = useStudioStore((s) => s.currentProjectId);
+  const currentProjectName = useStudioStore((s) => s.currentProjectName);
 
   const { data: session, isPending: sessionLoading } = useSession();
 
   const [projects, setProjects] = useState<CloudProject[]>([]);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(
-    null
-  );
-  const [currentProjectName, setCurrentProjectName] = useState<string | null>(
-    null
-  );
   const [status, setStatus] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("Untitled project");
 
@@ -41,18 +39,19 @@ export default function Sidebar({
   useEffect(() => {
     if (session) {
       loadProjects();
-    } else {
-      setProjects([]);
-      setCurrentProjectId(null);
-      setCurrentProjectName(null);
+      return;
+    }
+    setProjects([]);
+    // Only once the session has actually resolved — while it's still pending
+    // we'd wipe the binding restored from localStorage on every page load.
+    if (!sessionLoading) {
+      clearProjectBinding();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, sessionLoading]);
 
   const handleNewProject = () => {
     newProjectGraph();
-    setCurrentProjectId(null);
-    setCurrentProjectName(null);
     setDraftName("Untitled project");
     setStatus(null);
   };
@@ -60,32 +59,13 @@ export default function Sidebar({
   const handleSave = async () => {
     if (!session) return;
 
-    const name = currentProjectId
-      ? currentProjectName
-      : draftName.trim() || "Untitled project";
-
     setStatus("Saving...");
-    const res = currentProjectId
-      ? await fetch(`/api/projects/${currentProjectId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, graph: { nodes, edges } }),
-        })
-      : await fetch("/api/projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, graph: { nodes, edges } }),
-        });
-
-    if (!res.ok) {
-      setStatus("Save failed");
+    const result = await saveProject(draftName);
+    if ("error" in result) {
+      setStatus(result.error);
       return;
     }
-
-    const { project } = await res.json();
-    setCurrentProjectId(project.id);
-    setCurrentProjectName(project.name);
-    setStatus(`Saved "${project.name}"`);
+    setStatus(`Saved "${result.name}"`);
     loadProjects();
   };
 
@@ -96,9 +76,10 @@ export default function Sidebar({
       return;
     }
     const { project } = await res.json();
-    loadGraph(project.graph.nodes, project.graph.edges);
-    setCurrentProjectId(project.id);
-    setCurrentProjectName(project.name);
+    loadGraph(project.graph.nodes, project.graph.edges, {
+      id: project.id,
+      name: project.name,
+    });
     setStatus(`Loaded "${project.name}"`);
   };
 
