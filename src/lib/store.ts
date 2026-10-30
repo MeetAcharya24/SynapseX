@@ -68,6 +68,8 @@ type StudioState = {
   deleteNode: (id: string) => void;
   setSelectedNodeId: (id: string | null) => void;
   setApiKey: (provider: Provider, key: string) => void;
+  loadGraph: (nodes: AgentNode[], edges: Edge[]) => void;
+  newProject: () => void;
 };
 
 const defaultNode = (position: { x: number; y: number }): AgentNode => ({
@@ -132,6 +134,16 @@ export const useStudioStore = create<StudioState>()(
 
       setApiKey: (provider, key) =>
         set({ apiKeys: { ...get().apiKeys, [provider]: key } }),
+
+      loadGraph: (nodes, edges) =>
+        set({ nodes, edges, selectedNodeId: null }),
+
+      newProject: () =>
+        set({
+          nodes: [defaultNode({ x: 240, y: 160 })],
+          edges: [],
+          selectedNodeId: null,
+        }),
     }),
     {
       name: "synapsex-studio",
