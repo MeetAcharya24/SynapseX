@@ -205,7 +205,14 @@ export const useStudioStore = create<StudioState>()(
             });
 
         if (!res.ok) {
-          return { error: "Save failed" };
+          let message = "Save failed";
+          try {
+            const data = await res.json();
+            if (typeof data?.error === "string") message = data.error;
+          } catch {
+            // Non-JSON error body — fall back to the generic message above.
+          }
+          return { error: message };
         }
 
         const { project } = await res.json();

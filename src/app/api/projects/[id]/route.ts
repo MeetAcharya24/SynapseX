@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { sql } from "@/lib/db";
+import { handleUnexpectedError } from "@/lib/api-error";
+import { validateGraph } from "@/lib/graph-limits";
 
 export async function GET(
   req: NextRequest,
@@ -13,21 +15,25 @@ export async function GET(
 
   const { id } = await params;
 
-  const [project] = await sql`
-    select id, user_id, name, graph, created_at, updated_at
-    from projects
-    where id = ${id}
-  `;
+  try {
+    const [project] = await sql`
+      select id, user_id, name, graph, created_at, updated_at
+      from projects
+      where id = ${id}
+    `;
 
-  if (!project) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (project.user_id !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+    if (!project) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (project.user_id !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-  const { user_id: _user_id, ...rest } = project;
-  return NextResponse.json({ project: rest });
+    const { user_id: _user_id, ...rest } = project;
+    return NextResponse.json({ project: rest });
+  } catch (err) {
+    return handleUnexpectedError(err, "api/projects/[id] GET");
+  }
 }
 
 export async function PUT(
@@ -39,18 +45,29 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { id } = await params;
+
+  let body: { name?: unknown; graph?: unknown };
   try {
-    const { id } = await params;
-    const body = await req.json();
-    const { name, graph } = body;
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-    if (!name || !graph) {
-      return NextResponse.json(
-        { error: "Missing name or graph" },
-        { status: 400 }
-      );
-    }
+  const { name, graph } = body;
+  if (!name || !graph) {
+    return NextResponse.json(
+      { error: "Missing name or graph" },
+      { status: 400 }
+    );
+  }
 
+  const graphError = validateGraph(graph);
+  if (graphError) {
+    return NextResponse.json(graphError, { status: 400 });
+  }
+
+  try {
     const [existing] = await sql`
       select user_id from projects where id = ${id}
     `;
@@ -70,8 +87,7 @@ export async function PUT(
 
     return NextResponse.json({ project });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return handleUnexpectedError(err, "api/projects/[id] PUT");
   }
 }
 
@@ -86,17 +102,21 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const [existing] = await sql`
-    select user_id from projects where id = ${id}
-  `;
-  if (!existing) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (existing.user_id !== session.user.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  try {
+    const [existing] = await sql`
+      select user_id from projects where id = ${id}
+    `;
+    if (!existing) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (existing.user_id !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-  await sql`delete from projects where id = ${id}`;
+    await sql`delete from projects where id = ${id}`;
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return handleUnexpectedError(err, "api/projects/[id] DELETE");
+  }
 }
