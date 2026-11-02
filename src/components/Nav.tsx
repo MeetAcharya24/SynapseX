@@ -35,7 +35,9 @@ export default function Nav() {
         </nav>
         <Magnetic strength={0.2}>
           <a
-            href="#"
+            href="https://github.com/MeetAcharya24/SynapseX"
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-full border-hair px-5 py-2 text-sm font-medium transition-colors hover:border-[color:var(--color-accent-line)]"
           >
             GitHub
