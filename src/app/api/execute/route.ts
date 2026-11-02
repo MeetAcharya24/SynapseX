@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { auth } from "@/lib/auth";
 import { sql } from "@/lib/db";
-import { parseProjectEdges, parseProjectNodes, runProjectGraph } from "@/lib/graph-executor";
+import { parseProjectEdges, parseProjectNodes } from "@/lib/graph-executor";
+import { createJob } from "@/lib/jobs";
+import { runProjectJob } from "@/lib/job-runner";
 
 export async function POST(req: NextRequest) {
   const session = await auth.api.getSession({ headers: req.headers });
@@ -37,17 +40,16 @@ export async function POST(req: NextRequest) {
   const graph = project.graph as { nodes?: unknown[]; edges?: unknown[] };
   const nodes = parseProjectNodes(Array.isArray(graph.nodes) ? graph.nodes : []);
   const edges = parseProjectEdges(Array.isArray(graph.edges) ? graph.edges : []);
+  const resolvedApiKeys = apiKeys && typeof apiKeys === "object" ? apiKeys : {};
 
-  try {
-    const result = await runProjectGraph({
-      nodes,
-      edges,
-      task,
-      apiKeys: apiKeys && typeof apiKeys === "object" ? apiKeys : {},
-    });
-    return NextResponse.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const jobId = crypto.randomUUID();
+  const userId = session.user.id;
+
+  await createJob({ id: jobId, projectId, userId, task });
+
+  after(() =>
+    runProjectJob({ jobId, projectId, userId, task, nodes, edges, apiKeys: resolvedApiKeys })
+  );
+
+  return NextResponse.json({ jobId }, { status: 202 });
 }

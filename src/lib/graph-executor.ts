@@ -76,11 +76,14 @@ export async function runProjectGraph({
   edges,
   task,
   apiKeys,
+  onStep,
 }: {
   nodes: ProjectNode[];
   edges: ProjectEdge[];
   task: string;
   apiKeys: Partial<Record<Provider, string>>;
+  /** Called right after each node finishes, in completion order. */
+  onStep?: (step: NodeTrace) => void | Promise<void>;
 }): Promise<{ outputs: Record<string, string>; trace: NodeTrace[]; finalOutput: string }> {
   if (nodes.length === 0) {
     throw new Error("Project has no agent nodes");
@@ -133,7 +136,9 @@ export async function runProjectGraph({
         tools: await resolveTools(node.data.tools),
       });
 
-      trace.push({ nodeId: node.id, input, output, toolCalls });
+      const step = { nodeId: node.id, input, output, toolCalls };
+      trace.push(step);
+      if (onStep) await onStep(step);
       return { outputs: { [node.id]: output } };
     });
   }

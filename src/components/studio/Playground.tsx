@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useStudioStore } from "@/lib/store";
 import { useSession } from "@/lib/auth-client";
 
@@ -45,12 +45,77 @@ export default function Playground() {
   const [status, setStatus] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const usedProviders = Array.from(new Set(nodes.map((n) => n.data.provider)));
   const missingKeys = usedProviders.filter((p) => !apiKeys[p]);
 
+  type TraceStep = {
+    nodeId: string;
+    input: string;
+    output: string;
+    toolCalls?: TraceToolCall[];
+  };
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  function applyTrace(trace: TraceStep[]) {
+    setSteps(
+      trace.map((t) => ({
+        nodeId: t.nodeId,
+        label: nodes.find((n) => n.id === t.nodeId)?.data.label ?? t.nodeId,
+        output: t.output,
+        toolCalls: t.toolCalls ?? [],
+      }))
+    );
+  }
+
+  function pollJob(jobId: string) {
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/execute/${jobId}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Request failed");
+
+        const job: {
+          status: "queued" | "running" | "done" | "error";
+          trace: TraceStep[];
+          error?: string;
+        } = json.job;
+
+        applyTrace(job.trace);
+
+        if (job.status === "queued") {
+          setStatus("Queued...");
+        } else if (job.status === "running") {
+          setStatus("Running...");
+        } else if (job.status === "done") {
+          setStatus(null);
+          setRunning(false);
+          stopPolling();
+        } else if (job.status === "error") {
+          setError(job.error ?? "Run failed");
+          setStatus(null);
+          setRunning(false);
+          stopPolling();
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Something went wrong");
+        setStatus(null);
+        setRunning(false);
+        stopPolling();
+      }
+    }, 1200);
+  }
+
   async function run() {
     if (!task.trim() || running) return;
+    stopPolling();
     setRunning(true);
     setError(null);
     setSteps([]);
@@ -63,12 +128,13 @@ export default function Playground() {
         const result = await saveProject(currentProjectName ?? undefined);
         if ("error" in result) {
           setError(result.error);
+          setRunning(false);
           return;
         }
         projectId = result.id;
       }
 
-      setStatus("Running...");
+      setStatus("Queued...");
       const res = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -77,25 +143,10 @@ export default function Playground() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Request failed");
 
-      const trace: {
-        nodeId: string;
-        input: string;
-        output: string;
-        toolCalls?: TraceToolCall[];
-      }[] = json.trace ?? [];
-      setSteps(
-        trace.map((t) => ({
-          nodeId: t.nodeId,
-          label: nodes.find((n) => n.id === t.nodeId)?.data.label ?? t.nodeId,
-          output: t.output,
-          toolCalls: t.toolCalls ?? [],
-        }))
-      );
-      setStatus(null);
+      pollJob(json.jobId as string);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setStatus(null);
-    } finally {
       setRunning(false);
     }
   }
