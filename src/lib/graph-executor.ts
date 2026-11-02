@@ -130,7 +130,7 @@ export async function runProjectGraph({
         model: node.data.model,
         systemPrompt: node.data.systemPrompt,
         input,
-        tools: resolveTools(node.data.tools),
+        tools: await resolveTools(node.data.tools),
       });
 
       trace.push({ nodeId: node.id, input, output, toolCalls });

@@ -42,6 +42,7 @@ export const AVAILABLE_TOOLS = [
   { id: "database", label: "Database query" },
   { id: "http", label: "HTTP / API call" },
   { id: "file_system", label: "File read/write" },
+  { id: "mcp_demo", label: "MCP demo tools" },
 ];
 
 export type AgentNodeData = {

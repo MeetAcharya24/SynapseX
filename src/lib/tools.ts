@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import { getMcpDemoTools } from "@/lib/mcp";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -122,15 +123,28 @@ const TOOL_IMPLEMENTATIONS: Record<string, ToolDefinition> = {
  * Resolves a node's enabled tool ids to real tool definitions. Ids with no
  * implementation yet (web_search, database, file_system) are skipped — they
  * are UI placeholders, so the model is never told about a tool it can't call.
+ * "mcp_demo" is resolved separately below since it expands to a whole set of
+ * tools fetched live over MCP rather than one static definition.
  */
-export function resolveTools(toolIds: string[]): ToolDefinition[] {
+export async function resolveTools(toolIds: string[]): Promise<ToolDefinition[]> {
   const seen = new Set<string>();
   const resolved: ToolDefinition[] = [];
+
   for (const id of toolIds) {
     const def = TOOL_IMPLEMENTATIONS[id];
     if (!def || seen.has(def.name)) continue;
     seen.add(def.name);
     resolved.push(def);
   }
+
+  if (toolIds.includes("mcp_demo")) {
+    const mcpTools = await getMcpDemoTools();
+    for (const def of mcpTools) {
+      if (seen.has(def.name)) continue;
+      seen.add(def.name);
+      resolved.push(def);
+    }
+  }
+
   return resolved;
 }
