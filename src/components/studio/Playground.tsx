@@ -15,6 +15,7 @@ type Step = {
   label: string;
   output: string;
   toolCalls: TraceToolCall[];
+  toolsExhausted: boolean;
 };
 
 const MAX_ARG_CHARS = 60;
@@ -55,6 +56,7 @@ export default function Playground() {
     input: string;
     output: string;
     toolCalls?: TraceToolCall[];
+    toolsExhausted?: boolean;
   };
 
   function stopPolling() {
@@ -71,6 +73,7 @@ export default function Playground() {
         label: nodes.find((n) => n.id === t.nodeId)?.data.label ?? t.nodeId,
         output: t.output,
         toolCalls: t.toolCalls ?? [],
+        toolsExhausted: t.toolsExhausted ?? false,
       }))
     );
   }
@@ -195,6 +198,12 @@ export default function Playground() {
                     {formatToolArgs(call.args)})
                   </p>
                 ))}
+                {step.toolsExhausted && (
+                  <p className="font-mono text-[10px] text-amber-400">
+                    ⚠ ran out of tool-call attempts — answered from general
+                    knowledge
+                  </p>
+                )}
                 <p className="whitespace-pre-wrap text-dim">{step.output}</p>
               </div>
             ))}
@@ -211,7 +220,7 @@ export default function Playground() {
             />
             <button
               onClick={run}
-              disabled={running}
+              disabled={running || !task.trim()}
               className="rounded-lg bg-[color:var(--color-accent)] px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
             >
               {running ? "…" : "Run"}

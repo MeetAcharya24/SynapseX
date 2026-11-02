@@ -26,6 +26,9 @@ export type NodeTrace = {
   /** Tools the model chose to call on this node, in call order. Empty if it
    *  decided it didn't need any — which is itself the interesting signal. */
   toolCalls: ToolCall[];
+  /** True if this node ran out of tool-call rounds and had to be forced into
+   *  a final tools-disabled answer — a visible sign it struggled. */
+  toolsExhausted?: boolean;
 };
 
 // Loaded from the `projects.graph` jsonb column, so shape isn't guaranteed —
@@ -136,7 +139,7 @@ export async function runProjectGraph({
 
       // The node's enabled tools are offered to the model as real callable
       // functions; whether any of them run is the model's decision, not ours.
-      const { output, toolCalls } = await runModelWithTools({
+      const { output, toolCalls, toolsExhausted } = await runModelWithTools({
         provider: node.data.provider,
         apiKey: apiKeys[node.data.provider] ?? "",
         model: node.data.model,
@@ -150,7 +153,7 @@ export async function runProjectGraph({
         await appendNodeMemory(projectId, node.id, input, output);
       }
 
-      const step = { nodeId: node.id, input, output, toolCalls };
+      const step = { nodeId: node.id, input, output, toolCalls, toolsExhausted };
       trace.push(step);
       if (onStep) await onStep(step);
       return { outputs: { [node.id]: output } };

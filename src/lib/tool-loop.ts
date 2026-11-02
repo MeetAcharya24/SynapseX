@@ -17,7 +17,14 @@ export type ToolCall = {
   ok: boolean;
 };
 
-export type ToolRunResult = { output: string; toolCalls: ToolCall[] };
+export type ToolRunResult = {
+  output: string;
+  toolCalls: ToolCall[];
+  /** True if the model still wanted to call tools after MAX_TOOL_ROUNDS and
+   *  had to be forced into one final tools-disabled round to get an answer —
+   *  a visible signal that this node struggled, not a silent cascade. */
+  toolsExhausted?: boolean;
+};
 
 export type HistoryExchange = { task: string; response: string };
 
@@ -37,6 +44,16 @@ const MAX_TOOL_ROUNDS = 5;
 const ANTHROPIC_MAX_TOKENS = 2048;
 /** Tool output handed back to the model, capped so one page can't blow the window. */
 const MAX_TOOL_RESULT_CHARS = 8_000;
+/** Shown when a round produced neither a tool call nor any text. */
+const FALLBACK_NO_TEXT = "(The model returned no answer.)";
+/** Nudge for the forced final round once tool calls are exhausted — asks for
+ *  a direct answer instead of leaving the node (and everything downstream)
+ *  with nothing. */
+const TOOL_EXHAUSTED_NUDGE =
+  "You've used all available tool calls without reaching a final answer. " +
+  "Answer the original request directly now, using only what you already " +
+  "know. If you genuinely cannot answer, say so in one sentence.";
+const FALLBACK_EXHAUSTED = "(No answer after using all available tool calls.)";
 
 export async function runModelWithTools(args: RunArgs): Promise<ToolRunResult> {
   if (!args.apiKey) {
@@ -108,7 +125,7 @@ async function runOpenAi({
   ];
   const toolCalls: ToolCall[] = [];
 
-  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const body: Record<string, unknown> = { model, messages };
     if (tools.length > 0) {
       body.tools = tools.map((t) => ({
@@ -128,8 +145,8 @@ async function runOpenAi({
     const message = json.choices?.[0]?.message;
     const requested = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
 
-    if (requested.length === 0 || round === MAX_TOOL_ROUNDS) {
-      return { output: message?.content ?? "(no response)", toolCalls };
+    if (requested.length === 0) {
+      return { output: message?.content || FALLBACK_NO_TEXT, toolCalls };
     }
 
     messages.push(message);
@@ -144,7 +161,19 @@ async function runOpenAi({
     }
   }
 
-  return { output: "(no response)", toolCalls };
+  // Still wanted to call tools after MAX_TOOL_ROUNDS — force one final
+  // tools-disabled round so the node ends with a real answer instead of
+  // silently handing "(no response)" to everything downstream.
+  messages.push({ role: "user", content: TOOL_EXHAUSTED_NUDGE });
+  const finalRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages }),
+  });
+  if (!finalRes.ok) throw new Error(await describeError(finalRes));
+  const finalJson = await finalRes.json();
+  const finalText = finalJson.choices?.[0]?.message?.content;
+  return { output: finalText || FALLBACK_EXHAUSTED, toolCalls, toolsExhausted: true };
 }
 
 // --- Anthropic -----------------------------------------------------------
@@ -174,7 +203,7 @@ async function runAnthropic({
   ];
   const toolCalls: ToolCall[] = [];
 
-  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const body: Record<string, unknown> = {
       model,
       system: systemPrompt,
@@ -203,13 +232,9 @@ async function runAnthropic({
     const blocks: AnthropicBlock[] = Array.isArray(json.content) ? json.content : [];
     const toolUses = blocks.filter((b) => b.type === "tool_use");
 
-    if (toolUses.length === 0 || round === MAX_TOOL_ROUNDS) {
-      const text = blocks
-        .filter((b) => b.type === "text" && b.text)
-        .map((b) => b.text)
-        .join("\n")
-        .trim();
-      return { output: text || "(no response)", toolCalls };
+    if (toolUses.length === 0) {
+      const text = extractAnthropicText(blocks);
+      return { output: text || FALLBACK_NO_TEXT, toolCalls };
     }
 
     messages.push({ role: "assistant", content: blocks });
@@ -227,7 +252,39 @@ async function runAnthropic({
     messages.push({ role: "user", content: results });
   }
 
-  return { output: "(no response)", toolCalls };
+  // Still wanted to call tools after MAX_TOOL_ROUNDS — force one final
+  // tools-disabled round so the node ends with a real answer instead of
+  // silently handing "(no response)" to everything downstream.
+  messages.push({ role: "user", content: TOOL_EXHAUSTED_NUDGE });
+  const finalRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      system: systemPrompt,
+      max_tokens: ANTHROPIC_MAX_TOKENS,
+      messages,
+    }),
+  });
+  if (!finalRes.ok) throw new Error(await describeError(finalRes));
+  const finalJson = await finalRes.json();
+  const finalBlocks: AnthropicBlock[] = Array.isArray(finalJson.content)
+    ? finalJson.content
+    : [];
+  const finalText = extractAnthropicText(finalBlocks);
+  return { output: finalText || FALLBACK_EXHAUSTED, toolCalls, toolsExhausted: true };
+}
+
+function extractAnthropicText(blocks: AnthropicBlock[]): string {
+  return blocks
+    .filter((b) => b.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
 }
 
 // --- Google --------------------------------------------------------------
@@ -254,7 +311,7 @@ async function runGoogle({
   ];
   const toolCalls: ToolCall[] = [];
 
-  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const body: Record<string, unknown> = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents,
@@ -284,13 +341,9 @@ async function runGoogle({
     const parts: GeminiPart[] = json.candidates?.[0]?.content?.parts ?? [];
     const fnCalls = parts.filter((p) => p.functionCall?.name);
 
-    if (fnCalls.length === 0 || round === MAX_TOOL_ROUNDS) {
-      const text = parts
-        .filter((p) => typeof p.text === "string" && p.text)
-        .map((p) => p.text)
-        .join("\n")
-        .trim();
-      return { output: text || "(no response)", toolCalls };
+    if (fnCalls.length === 0) {
+      const text = extractGeminiText(parts);
+      return { output: text || FALLBACK_NO_TEXT, toolCalls };
     }
 
     contents.push({ role: "model", parts });
@@ -306,5 +359,32 @@ async function runGoogle({
     contents.push({ role: "user", parts: responseParts });
   }
 
-  return { output: "(no response)", toolCalls };
+  // Still wanted to call tools after MAX_TOOL_ROUNDS — force one final
+  // tools-disabled round so the node ends with a real answer instead of
+  // silently handing "(no response)" to everything downstream.
+  contents.push({ role: "user", parts: [{ text: TOOL_EXHAUSTED_NUDGE }] });
+  const finalRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+      }),
+    }
+  );
+  if (!finalRes.ok) throw new Error(await describeError(finalRes));
+  const finalJson = await finalRes.json();
+  const finalParts: GeminiPart[] = finalJson.candidates?.[0]?.content?.parts ?? [];
+  const finalText = extractGeminiText(finalParts);
+  return { output: finalText || FALLBACK_EXHAUSTED, toolCalls, toolsExhausted: true };
+}
+
+function extractGeminiText(parts: GeminiPart[]): string {
+  return parts
+    .filter((p) => typeof p.text === "string" && p.text)
+    .map((p) => p.text)
+    .join("\n")
+    .trim();
 }
