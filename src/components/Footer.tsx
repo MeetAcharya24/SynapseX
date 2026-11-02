@@ -17,7 +17,12 @@ export default function Footer() {
           <a href="#" className="link-underline hover:text-accent">
             Docs
           </a>
-          <a href="#" className="link-underline hover:text-accent">
+          <a
+            href="https://github.com/MeetAcharya24/SynapseX"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="link-underline hover:text-accent"
+          >
             GitHub
           </a>
         </div>
