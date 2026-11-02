@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import Link from "next/link";
 import Magnetic from "./Magnetic";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -95,17 +96,26 @@ export default function Hero() {
 
         <div className="mt-10 flex flex-wrap items-center gap-4">
           <Magnetic>
+            <Link
+              data-hero-cta
+              href="/studio"
+              className="group inline-flex items-center gap-2 rounded-full bg-[color:var(--color-accent)] px-7 py-3 font-medium text-black"
+            >
+              Launch Studio
+              <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">
+                →
+              </span>
+            </Link>
+          </Magnetic>
+          <Magnetic strength={0.25}>
             <a
               data-hero-cta
               href="https://github.com/MeetAcharya24/SynapseX"
               target="_blank"
               rel="noopener noreferrer"
-              className="group inline-flex items-center gap-2 rounded-full bg-[color:var(--color-accent)] px-7 py-3 font-medium text-black"
+              className="rounded-full border-hair px-7 py-3 font-medium text-text transition-colors hover:border-[color:var(--color-accent-line)]"
             >
               View on GitHub
-              <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">
-                →
-              </span>
             </a>
           </Magnetic>
           <Magnetic strength={0.25}>

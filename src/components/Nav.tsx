@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import Magnetic from "./Magnetic";
 
 export default function Nav() {
@@ -33,16 +34,26 @@ export default function Nav() {
             Docs
           </a>
         </nav>
-        <Magnetic strength={0.2}>
-          <a
-            href="https://github.com/MeetAcharya24/SynapseX"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full border-hair px-5 py-2 text-sm font-medium transition-colors hover:border-[color:var(--color-accent-line)]"
-          >
-            GitHub
-          </a>
-        </Magnetic>
+        <div className="flex items-center gap-3">
+          <Magnetic strength={0.2}>
+            <Link
+              href="/studio"
+              className="rounded-full bg-[color:var(--color-accent)] px-5 py-2 text-sm font-medium text-black transition-opacity hover:opacity-90"
+            >
+              Launch Studio
+            </Link>
+          </Magnetic>
+          <Magnetic strength={0.2}>
+            <a
+              href="https://github.com/MeetAcharya24/SynapseX"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border-hair px-5 py-2 text-sm font-medium transition-colors hover:border-[color:var(--color-accent-line)]"
+            >
+              GitHub
+            </a>
+          </Magnetic>
+        </div>
       </div>
     </header>
   );
