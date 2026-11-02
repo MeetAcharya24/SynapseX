@@ -52,7 +52,9 @@ export default function CTA() {
       <div data-cta-el className="mt-8 flex flex-wrap items-center justify-center gap-4">
         <Magnetic>
           <a
-            href="#"
+            href="https://github.com/MeetAcharya24/SynapseX"
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-full bg-[color:var(--color-accent)] px-7 py-3 font-medium text-black"
           >
             View on GitHub

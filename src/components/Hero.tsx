@@ -97,7 +97,9 @@ export default function Hero() {
           <Magnetic>
             <a
               data-hero-cta
-              href="#"
+              href="https://github.com/MeetAcharya24/SynapseX"
+              target="_blank"
+              rel="noopener noreferrer"
               className="group inline-flex items-center gap-2 rounded-full bg-[color:var(--color-accent)] px-7 py-3 font-medium text-black"
             >
               View on GitHub
