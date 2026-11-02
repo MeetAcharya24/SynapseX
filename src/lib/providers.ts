@@ -83,7 +83,7 @@ export async function runModel({
   throw new Error(`Unknown provider: ${provider}`);
 }
 
-async function describeError(res: Response): Promise<string> {
+export async function describeError(res: Response): Promise<string> {
   try {
     const body = await res.json();
     const msg =

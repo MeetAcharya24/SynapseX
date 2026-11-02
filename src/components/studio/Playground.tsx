@@ -4,7 +4,31 @@ import { useState } from "react";
 import { useStudioStore } from "@/lib/store";
 import { useSession } from "@/lib/auth-client";
 
-type Step = { nodeId: string; label: string; output: string };
+type TraceToolCall = {
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+};
+
+type Step = {
+  nodeId: string;
+  label: string;
+  output: string;
+  toolCalls: TraceToolCall[];
+};
+
+const MAX_ARG_CHARS = 60;
+
+function formatToolArgs(args: Record<string, unknown>): string {
+  return Object.entries(args)
+    .map(([key, value]) => {
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      const shown =
+        text.length > MAX_ARG_CHARS ? `${text.slice(0, MAX_ARG_CHARS)}…` : text;
+      return `${key}: ${shown}`;
+    })
+    .join(", ");
+}
 
 export default function Playground() {
   const nodes = useStudioStore((s) => s.nodes);
@@ -53,13 +77,18 @@ export default function Playground() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Request failed");
 
-      const trace: { nodeId: string; input: string; output: string }[] =
-        json.trace ?? [];
+      const trace: {
+        nodeId: string;
+        input: string;
+        output: string;
+        toolCalls?: TraceToolCall[];
+      }[] = json.trace ?? [];
       setSteps(
         trace.map((t) => ({
           nodeId: t.nodeId,
           label: nodes.find((n) => n.id === t.nodeId)?.data.label ?? t.nodeId,
           output: t.output,
+          toolCalls: t.toolCalls ?? [],
         }))
       );
       setStatus(null);
@@ -106,6 +135,15 @@ export default function Playground() {
                 >
                   STEP {i + 1} · {step.label.toUpperCase()}
                 </span>
+                {step.toolCalls.map((call, j) => (
+                  <p
+                    key={`${call.tool}-${j}`}
+                    className="font-mono text-[10px] text-faint"
+                  >
+                    {call.ok ? "↳ called" : "↳ failed"} {call.tool}(
+                    {formatToolArgs(call.args)})
+                  </p>
+                ))}
                 <p className="whitespace-pre-wrap text-dim">{step.output}</p>
               </div>
             ))}

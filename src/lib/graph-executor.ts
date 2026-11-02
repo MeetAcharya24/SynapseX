@@ -1,6 +1,6 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
-import { runModel, type ChatMessage } from "@/lib/providers";
-import { extractUrl, fetchUrlContent } from "@/lib/tools";
+import { runModelWithTools, type ToolCall } from "@/lib/tool-loop";
+import { resolveTools } from "@/lib/tools";
 
 type Provider = "openai" | "anthropic" | "google";
 const PROVIDERS = new Set<Provider>(["openai", "anthropic", "google"]);
@@ -17,7 +17,14 @@ export type ProjectNode = {
 
 export type ProjectEdge = { source: string; target: string };
 
-export type NodeTrace = { nodeId: string; input: string; output: string };
+export type NodeTrace = {
+  nodeId: string;
+  input: string;
+  output: string;
+  /** Tools the model chose to call on this node, in call order. Empty if it
+   *  decided it didn't need any — which is itself the interesting signal. */
+  toolCalls: ToolCall[];
+};
 
 // Loaded from the `projects.graph` jsonb column, so shape isn't guaranteed —
 // validate at this boundary rather than trusting stored data.
@@ -115,25 +122,18 @@ export async function runProjectGraph({
           ? preds.map((p) => state.outputs[p]).filter(Boolean).join("\n\n---\n\n")
           : state.task;
 
-      let contextualInput = input;
-      if (node.data.tools.includes("http")) {
-        const url = extractUrl(input);
-        if (url) {
-          const fetched = await fetchUrlContent(url);
-          contextualInput = `Fetched content from ${url}:\n\n${fetched}\n\n---\n\nInstruction:\n${input}`;
-        }
-      }
-
-      const messages: ChatMessage[] = [{ role: "user", content: contextualInput }];
-      const output = await runModel({
+      // The node's enabled tools are offered to the model as real callable
+      // functions; whether any of them run is the model's decision, not ours.
+      const { output, toolCalls } = await runModelWithTools({
         provider: node.data.provider,
         apiKey: apiKeys[node.data.provider] ?? "",
         model: node.data.model,
         systemPrompt: node.data.systemPrompt,
-        messages,
+        input,
+        tools: resolveTools(node.data.tools),
       });
 
-      trace.push({ nodeId: node.id, input: contextualInput, output });
+      trace.push({ nodeId: node.id, input, output, toolCalls });
       return { outputs: { [node.id]: output } };
     });
   }
