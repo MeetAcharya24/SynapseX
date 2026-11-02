@@ -29,6 +29,7 @@ export async function runProjectJob({
 
   try {
     const result = await runProjectGraph({
+      projectId,
       nodes,
       edges,
       task,

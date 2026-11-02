@@ -19,6 +19,8 @@ export type ToolCall = {
 
 export type ToolRunResult = { output: string; toolCalls: ToolCall[] };
 
+export type HistoryExchange = { task: string; response: string };
+
 type RunArgs = {
   provider: Provider;
   apiKey: string;
@@ -26,6 +28,8 @@ type RunArgs = {
   systemPrompt: string;
   input: string;
   tools: ToolDefinition[];
+  /** Prior exchanges for a memory-enabled node, oldest first. */
+  history?: HistoryExchange[];
 };
 
 /** Guards against a model that keeps calling tools without ever answering. */
@@ -92,9 +96,14 @@ async function runOpenAi({
   systemPrompt,
   input,
   tools,
+  history,
 }: RunArgs): Promise<ToolRunResult> {
   const messages: Record<string, unknown>[] = [
     { role: "system", content: systemPrompt },
+    ...(history ?? []).flatMap((h) => [
+      { role: "user", content: h.task },
+      { role: "assistant", content: h.response },
+    ]),
     { role: "user", content: input },
   ];
   const toolCalls: ToolCall[] = [];
@@ -154,8 +163,15 @@ async function runAnthropic({
   systemPrompt,
   input,
   tools,
+  history,
 }: RunArgs): Promise<ToolRunResult> {
-  const messages: Record<string, unknown>[] = [{ role: "user", content: input }];
+  const messages: Record<string, unknown>[] = [
+    ...(history ?? []).flatMap((h) => [
+      { role: "user", content: h.task },
+      { role: "assistant", content: h.response },
+    ]),
+    { role: "user", content: input },
+  ];
   const toolCalls: ToolCall[] = [];
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -227,8 +243,13 @@ async function runGoogle({
   systemPrompt,
   input,
   tools,
+  history,
 }: RunArgs): Promise<ToolRunResult> {
   const contents: Record<string, unknown>[] = [
+    ...(history ?? []).flatMap((h) => [
+      { role: "user", parts: [{ text: h.task }] },
+      { role: "model", parts: [{ text: h.response }] },
+    ]),
     { role: "user", parts: [{ text: input }] },
   ];
   const toolCalls: ToolCall[] = [];

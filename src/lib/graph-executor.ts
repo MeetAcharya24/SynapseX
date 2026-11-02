@@ -1,6 +1,7 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { runModelWithTools, type ToolCall } from "@/lib/tool-loop";
 import { resolveTools } from "@/lib/tools";
+import { appendNodeMemory, loadNodeMemory } from "@/lib/memory";
 
 type Provider = "openai" | "anthropic" | "google";
 const PROVIDERS = new Set<Provider>(["openai", "anthropic", "google"]);
@@ -12,6 +13,7 @@ export type ProjectNode = {
     model: string;
     systemPrompt: string;
     tools: string[];
+    memory: boolean;
   };
 };
 
@@ -34,7 +36,7 @@ export function parseProjectNodes(raw: unknown[]): ProjectNode[] {
     if (!item || typeof item !== "object") continue;
     const { id, data } = item as Record<string, unknown>;
     if (typeof id !== "string" || !data || typeof data !== "object") continue;
-    const { provider, model, systemPrompt, tools } = data as Record<string, unknown>;
+    const { provider, model, systemPrompt, tools, memory } = data as Record<string, unknown>;
     if (!PROVIDERS.has(provider as Provider) || typeof model !== "string") continue;
     nodes.push({
       id,
@@ -43,6 +45,7 @@ export function parseProjectNodes(raw: unknown[]): ProjectNode[] {
         model,
         systemPrompt: typeof systemPrompt === "string" ? systemPrompt : "",
         tools: Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [],
+        memory: memory === true,
       },
     });
   }
@@ -72,12 +75,14 @@ const ExecAnnotation = Annotation.Root({
 });
 
 export async function runProjectGraph({
+  projectId,
   nodes,
   edges,
   task,
   apiKeys,
   onStep,
 }: {
+  projectId: string;
   nodes: ProjectNode[];
   edges: ProjectEdge[];
   task: string;
@@ -125,6 +130,10 @@ export async function runProjectGraph({
           ? preds.map((p) => state.outputs[p]).filter(Boolean).join("\n\n---\n\n")
           : state.task;
 
+      const history = node.data.memory
+        ? await loadNodeMemory(projectId, node.id)
+        : undefined;
+
       // The node's enabled tools are offered to the model as real callable
       // functions; whether any of them run is the model's decision, not ours.
       const { output, toolCalls } = await runModelWithTools({
@@ -134,7 +143,12 @@ export async function runProjectGraph({
         systemPrompt: node.data.systemPrompt,
         input,
         tools: await resolveTools(node.data.tools),
+        history,
       });
+
+      if (node.data.memory) {
+        await appendNodeMemory(projectId, node.id, input, output);
+      }
 
       const step = { nodeId: node.id, input, output, toolCalls };
       trace.push(step);
